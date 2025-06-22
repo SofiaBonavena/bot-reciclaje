@@ -8,21 +8,42 @@ require("dotenv").config();
 const app = express();
 app.use(bodyParser.urlencoded({ extended: false }));
 
+// Inicialización de APIs
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-const client = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
+const client = twilio(
+  process.env.TWILIO_ACCOUNT_SID,
+  process.env.TWILIO_AUTH_TOKEN
+);
 
 app.post("/webhook", async (req, res) => {
+  // 📥 Datos entrantes de WhatsApp
   const mediaUrl = req.body.MediaUrl0;
+  const mediaType = req.body.MediaContentType0;  // ahora sí lo obtenemos
   const from = req.body.From;
+
+  console.log("📥 Mensaje recibido de:", from);
+  console.log("Media URL:", mediaUrl);
+  console.log("Tipo de archivo:", mediaType);
 
   if (!mediaUrl) {
     return res.send("Por favor envía una imagen para clasificar.");
   }
 
   try {
-    const imageResponse = await axios.get(mediaUrl, { responseType: "arraybuffer" });
+    // 🔄 Descarga la imagen desde Twilio
+    const imageResponse = await axios.get(mediaUrl, {
+      responseType: "arraybuffer",
+      // Si tu sandbox o credenciales Twilio requieren cabecera auth:
+      // headers: {
+      //   Authorization: `Basic ${Buffer.from(`${process.env.TWILIO_ACCOUNT_SID}:${process.env.TWILIO_AUTH_TOKEN}`).toString("base64")}`
+      // }
+    });
+    console.log("✅ Imagen descargada desde Twilio");
+
+    // 🔀 Preparo la imagen en base64 para OpenAI
     const imageBase64 = Buffer.from(imageResponse.data, "binary").toString("base64");
 
+    // 📡 Llamo a OpenAI con visión
     const response = await openai.chat.completions.create({
       model: "gpt-4o",
       messages: [
@@ -34,27 +55,38 @@ app.post("/webhook", async (req, res) => {
           role: "user",
           content: [
             { type: "text", text: "¿Dónde debería tirar esto?" },
-            { type: "image_url", image_url: { url: `data:image/jpeg;base64,${imageBase64}` } }
+            {
+              type: "image_url",
+              image_url: {
+                // incluimos el mediaType para que GPT sepa el formato
+                url: `data:${mediaType};base64,${imageBase64}`
+              }
+            }
           ]
         }
       ]
     });
+    console.log("✅ Respuesta recibida de OpenAI");
 
+    // 📨 Envía la respuesta al usuario por WhatsApp
     const reply = response.choices[0].message.content;
-
     await client.messages.create({
       from: process.env.TWILIO_WHATSAPP_NUMBER,
       to: from,
       body: reply
     });
+    console.log("📤 Respuesta enviada a WhatsApp");
 
-    res.send("OK");
+    res.sendStatus(200);
   } catch (error) {
-    console.error("Error:", error.message);
+    // 🛑 Error general
+    console.error("🔥 ERROR GENERAL:", error);
     res.status(500).send("Hubo un error procesando la imagen.");
   }
 });
 
-app.listen(3000, () => {
-  console.log("Servidor corriendo en http://localhost:3000");
+// 📡 Escucha en el puerto dinámico de Railway
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, "0.0.0.0", () => {
+  console.log(`Servidor corriendo en el puerto ${PORT}`);
 });
