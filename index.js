@@ -5,6 +5,16 @@ const { OpenAI } = require("openai");
 const twilio = require("twilio");
 require("dotenv").config();
 
+if (
+  !process.env.OPENAI_API_KEY ||
+  !process.env.TWILIO_ACCOUNT_SID ||
+  !process.env.TWILIO_AUTH_TOKEN ||
+  !process.env.TWILIO_WHATSAPP_NUMBER
+) {
+  console.error("❌ Faltan variables de entorno. Verificá que estén todas cargadas en Railway.");
+  process.exit(1); // detiene la app si faltan variables
+}
+
 const app = express();
 app.use(bodyParser.urlencoded({ extended: false }));
 
