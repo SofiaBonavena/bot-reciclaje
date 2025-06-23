@@ -5,6 +5,7 @@ const { OpenAI } = require("openai");
 const twilio = require("twilio");
 require("dotenv").config();
 
+// ✅ Verificamos que las variables estén definidas
 if (
   !process.env.OPENAI_API_KEY ||
   !process.env.TWILIO_ACCOUNT_SID ||
@@ -12,13 +13,13 @@ if (
   !process.env.TWILIO_WHATSAPP_NUMBER
 ) {
   console.error("❌ Faltan variables de entorno. Verificá que estén todas cargadas en Railway.");
-  process.exit(1); // detiene la app si faltan variables
+  process.exit(1);
 }
 
 const app = express();
 app.use(bodyParser.urlencoded({ extended: false }));
 
-// Inicialización de APIs
+// 🔐 Inicialización de APIs
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 const client = twilio(
   process.env.TWILIO_ACCOUNT_SID,
@@ -26,9 +27,8 @@ const client = twilio(
 );
 
 app.post("/webhook", async (req, res) => {
-  // 📥 Datos entrantes de WhatsApp
   const mediaUrl = req.body.MediaUrl0;
-  const mediaType = req.body.MediaContentType0;  // ahora sí lo obtenemos
+  const mediaType = req.body.MediaContentType0;
   const from = req.body.From;
 
   console.log("📥 Mensaje recibido de:", from);
@@ -39,21 +39,23 @@ app.post("/webhook", async (req, res) => {
     return res.send("Por favor envía una imagen para clasificar.");
   }
 
+  // 🌟 LOGS paso a paso para identificar errores internos
   try {
-    // 🔄 Descarga la imagen desde Twilio
+    console.log("🧪 Paso 1: Media URL recibida");
+
     const imageResponse = await axios.get(mediaUrl, {
       responseType: "arraybuffer",
-      // Si tu sandbox o credenciales Twilio requieren cabecera auth:
-      // headers: {
-      //   Authorization: `Basic ${Buffer.from(`${process.env.TWILIO_ACCOUNT_SID}:${process.env.TWILIO_AUTH_TOKEN}`).toString("base64")}`
-      // }
+      headers: {
+        Authorization: `Basic ${Buffer.from(
+          `${process.env.TWILIO_ACCOUNT_SID}:${process.env.TWILIO_AUTH_TOKEN}`
+        ).toString("base64")}`
+      }
     });
-    console.log("✅ Imagen descargada desde Twilio");
+    console.log("🧪 Paso 2: Imagen descargada desde Twilio");
 
-    // 🔀 Preparo la imagen en base64 para OpenAI
     const imageBase64 = Buffer.from(imageResponse.data, "binary").toString("base64");
+    console.log("🧪 Paso 3: Imagen convertida a base64");
 
-    // 📡 Llamo a OpenAI con visión
     const response = await openai.chat.completions.create({
       model: "gpt-4o",
       messages: [
@@ -68,7 +70,6 @@ app.post("/webhook", async (req, res) => {
             {
               type: "image_url",
               image_url: {
-                // incluimos el mediaType para que GPT sepa el formato
                 url: `data:${mediaType};base64,${imageBase64}`
               }
             }
@@ -76,38 +77,35 @@ app.post("/webhook", async (req, res) => {
         }
       ]
     });
-    console.log("Respuesta recibida de OpenAI");
+    console.log("🧪 Paso 4: Respuesta recibida de OpenAI");
 
-    // 📨 Envía la respuesta al usuario por WhatsApp
     const reply = response.choices[0].message.content;
+    console.log("🧪 Paso 5: Mensaje de respuesta generado");
+
     await client.messages.create({
       from: process.env.TWILIO_WHATSAPP_NUMBER,
       to: from,
       body: reply
     });
-    console.log("📤 Respuesta enviada a WhatsApp");
+    console.log("🧪 Paso 6: Mensaje enviado por WhatsApp");
 
     res.sendStatus(200);
   } catch (error) {
-  console.error("🔥 ERROR GENERAL:");
+    console.error("🔥 ERROR GENERAL:");
+    if (error.response) {
+      console.error("➡️ Status:", error.response.status);
+      console.error("➡️ Data:", error.response.data);
+    } else if (error.request) {
+      console.error("➡️ Request sin respuesta:", error.request);
+    } else {
+      console.error("➡️ Mensaje:", error.message);
+    }
 
-  if (error.response) {
-    // Errores de API (como OpenAI o descarga fallida de imagen)
-    console.error("➡️ Status:", error.response.status);
-    console.error("➡️ Data:", error.response.data);
-  } else if (error.request) {
-    // El request se hizo pero no se obtuvo respuesta
-    console.error("➡️ Request sin respuesta:", error.request);
-  } else {
-    // Cualquier otro error (de sintaxis, etc.)
-    console.error("➡️ Mensaje:", error.message);
+    res.status(500).send("Hubo un error procesando la imagen.");
   }
-
-  res.status(500).send("Hubo un error procesando la imagen.");
-  } 
 });
 
-// 📡 Escucha en el puerto dinámico de Railway
+// 🌍 Escucha en Railway (puerto 8080)
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, "0.0.0.0", () => {
   console.log(`Servidor corriendo en el puerto ${PORT}`);
