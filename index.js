@@ -76,7 +76,7 @@ app.post("/webhook", async (req, res) => {
         }
       ]
     });
-    console.log("✅ Respuesta recibida de OpenAI");
+    console.log("Respuesta recibida de OpenAI");
 
     // 📨 Envía la respuesta al usuario por WhatsApp
     const reply = response.choices[0].message.content;
@@ -89,10 +89,22 @@ app.post("/webhook", async (req, res) => {
 
     res.sendStatus(200);
   } catch (error) {
-    // 🛑 Error general
-    console.error("🔥 ERROR GENERAL:", error);
-    res.status(500).send("Hubo un error procesando la imagen.");
+  console.error("🔥 ERROR GENERAL:");
+
+  if (error.response) {
+    // Errores de API (como OpenAI o descarga fallida de imagen)
+    console.error("➡️ Status:", error.response.status);
+    console.error("➡️ Data:", error.response.data);
+  } else if (error.request) {
+    // El request se hizo pero no se obtuvo respuesta
+    console.error("➡️ Request sin respuesta:", error.request);
+  } else {
+    // Cualquier otro error (de sintaxis, etc.)
+    console.error("➡️ Mensaje:", error.message);
   }
+
+  res.status(500).send("Hubo un error procesando la imagen.");
+  } 
 });
 
 // 📡 Escucha en el puerto dinámico de Railway
