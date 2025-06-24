@@ -1,16 +1,15 @@
 const express = require("express");
 const axios = require("axios");
 const bodyParser = require("body-parser");
-const { OpenAI } = require("openai");
 const twilio = require("twilio");
 require("dotenv").config();
 
-// ✅ Verificamos que las variables estén definidas
+// 🚨 Verificamos que las variables estén definidas
 if (
-  !process.env.OPENAI_API_KEY ||
   !process.env.TWILIO_ACCOUNT_SID ||
   !process.env.TWILIO_AUTH_TOKEN ||
-  !process.env.TWILIO_WHATSAPP_NUMBER
+  !process.env.TWILIO_WHATSAPP_NUMBER ||
+  !process.env.HUGGINGFACE_API_TOKEN
 ) {
   console.error("❌ Faltan variables de entorno. Verificá que estén todas cargadas en Railway.");
   process.exit(1);
@@ -19,12 +18,31 @@ if (
 const app = express();
 app.use(bodyParser.urlencoded({ extended: false }));
 
-// 🔐 Inicialización de APIs
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 const client = twilio(
   process.env.TWILIO_ACCOUNT_SID,
   process.env.TWILIO_AUTH_TOKEN
 );
+
+const classifyImage = async (base64Image) => {
+  try {
+    const response = await axios.post(
+      "https://api-inference.huggingface.co/models/microsoft/resnet-50",
+      {
+        inputs: base64Image
+      },
+      {
+        headers: {
+          Authorization: `Bearer ${process.env.HUGGINGFACE_API_TOKEN}`,
+          "Content-Type": "application/json"
+        }
+      }
+    );
+    return response.data;
+  } catch (err) {
+    console.error("❌ Error al usar Hugging Face:", err.response?.data || err.message);
+    return null;
+  }
+};
 
 app.post("/webhook", async (req, res) => {
   const mediaUrl = req.body.MediaUrl0;
@@ -39,7 +57,6 @@ app.post("/webhook", async (req, res) => {
     return res.send("Por favor envía una imagen para clasificar.");
   }
 
-  // 🌟 LOGS paso a paso para identificar errores internos
   try {
     console.log("🧪 Paso 1: Media URL recibida");
 
@@ -51,43 +68,37 @@ app.post("/webhook", async (req, res) => {
         ).toString("base64")}`
       }
     });
+
     console.log("🧪 Paso 2: Imagen descargada desde Twilio");
 
     const imageBase64 = Buffer.from(imageResponse.data, "binary").toString("base64");
+    const dataUri = `data:${mediaType};base64,${imageBase64}`;
+
     console.log("🧪 Paso 3: Imagen convertida a base64");
 
-    const response = await openai.chat.completions.create({
-      model: "gpt-4o",
-      messages: [
-        {
-          role: "system",
-          content: "Sos un asistente de reciclaje. Analizás imágenes de residuos y decís en qué tacho va: reciclable, orgánico, compost, etc. Sé claro y explicá por qué."
-        },
-        {
-          role: "user",
-          content: [
-            { type: "text", text: "¿Dónde debería tirar esto?" },
-            {
-              type: "image_url",
-              image_url: {
-                url: `data:${mediaType};base64,${imageBase64}`
-              }
-            }
-          ]
-        }
-      ]
-    });
-    console.log("🧪 Paso 4: Respuesta recibida de OpenAI");
+    const result = await classifyImage(dataUri);
 
-    const reply = response.choices[0].message.content;
-    console.log("🧪 Paso 5: Mensaje de respuesta generado");
+    if (!result || result.error) {
+      await client.messages.create({
+        from: process.env.TWILIO_WHATSAPP_NUMBER,
+        to: from,
+        body: "Lo siento, no pude clasificar la imagen. Intentá con otra."
+      });
+      return res.sendStatus(200);
+    }
+
+    const topPrediction = result[0]?.label;
+    const confidence = (result[0]?.score * 100).toFixed(2);
+
+    const mensaje = `🔍 Detecté: *${topPrediction}* (${confidence}% de confianza)\n\n📦 Según lo que veo, podrías clasificar este residuo como reciclable, compost o basura común, según corresponda.`;
+
+    console.log("🧪 Paso 4: Resultado enviado al usuario");
 
     await client.messages.create({
       from: process.env.TWILIO_WHATSAPP_NUMBER,
       to: from,
-      body: reply
+      body: mensaje
     });
-    console.log("🧪 Paso 6: Mensaje enviado por WhatsApp");
 
     res.sendStatus(200);
   } catch (error) {
@@ -101,15 +112,22 @@ app.post("/webhook", async (req, res) => {
       console.error("➡️ Mensaje:", error.message);
     }
 
-    res.status(500).send("Hubo un error procesando la imagen.");
+    await client.messages.create({
+      from: process.env.TWILIO_WHATSAPP_NUMBER,
+      to: from,
+      body: "Hubo un error procesando tu imagen 😢. Intentá nuevamente."
+    });
+
+    res.status(500).send("Error interno.");
   }
 });
 
-// 🌍 Escucha en Railway (puerto 8080)
-const PORT = process.env.PORT || 3000;
+// ✅ Ruta de prueba para Railway
 app.get("/", (req, res) => {
   res.send("🌱 Bot de reciclaje funcionando correctamente");
 });
+
+const PORT = process.env.PORT || 3000;
 app.listen(PORT, "0.0.0.0", () => {
   console.log(`Servidor corriendo en el puerto ${PORT}`);
 });
