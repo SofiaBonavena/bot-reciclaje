@@ -107,6 +107,9 @@ app.post("/webhook", async (req, res) => {
 
 // 🌍 Escucha en Railway (puerto 8080)
 const PORT = process.env.PORT || 3000;
+app.get("/", (req, res) => {
+  res.send("🌱 Bot de reciclaje funcionando correctamente");
+});
 app.listen(PORT, "0.0.0.0", () => {
   console.log(`Servidor corriendo en el puerto ${PORT}`);
 });
